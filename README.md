@@ -123,16 +123,44 @@ python db_schema.py
 
 ## Usage
 
-[PLACEHOLDER — Backend to fill in: CLI/API commands to run the agent locally and to
-invoke the deployed Lambda function, with example input/output showing a memory
-write followed by a memory-informed response.]
+### Running Locally
+
+```bash
+# Ensure your .env file is configured, then run the Bedrock variant:
+python bedrock_agent.py
+```
+
+**Example output:**
+```
+--- STEP 1: ADDING MEMORY (BEDROCK) ---
+Running health check on cluster 'my-cluster'...
+Health check PASSED. Cluster is in CREATED state.
+Generating embedding for: 'The primary contact for the Cerberus project is Dr. Aris Thorne.'
+Successfully added new memory to the Perseus Vault.
+
+--- STEP 2: RECALLING MEMORY (BEDROCK) ---
+Recalling memories related to: 'Who is the main contact for project Cerberus?'
+
+Top recalled memories:
+  - [Content]: The primary contact for the Cerberus project is Dr. Aris Thorne. (Distance: 0.1234)
+```
+
+### Deploying to AWS Lambda
+
+1. Build the Docker image:
+   ```bash
+   docker build -t perseus-vault .
+   ```
+2. Push to Amazon ECR and create a Lambda function using the container image.
+3. Invoke the function to see persistent memory across stateless invocations.
 
 ## CockroachDB & AWS Tools Used
 
-- **CockroachDB Distributed Vector Indexing** — [how it's used]
-- **ccloud CLI (Agent-Ready)** — [how it's used]
-- **AWS Lambda** — [how it's used]
+- **CockroachDB Distributed Vector Indexing** — The agent's memory table (`vault_entries`) stores each memory's text content alongside a vector embedding in a native `VECTOR` column, indexed with a cosine-similarity vector index (`VECTOR INDEX ... vector_cosine_ops`). When the agent needs to recall information, it embeds the incoming query and runs an `ORDER BY embedding <-> query_vector LIMIT k` search directly against CockroachDB — no separate vector database, and no consistency gap between the agent's operational data and its semantic memory.
+- **ccloud CLI (Agent-Ready)** — Before committing a new memory to the database, the agent shells out to `ccloud cluster info` and checks that the cluster is reporting a healthy state before proceeding with the write. If the cluster isn't healthy, the agent logs a clear warning and skips the write rather than failing silently.
+- **AWS Lambda** — Hosts the agent's core logic (`bedrock_agent.py`) as a serverless function. Every invocation is a fresh execution environment, which is precisely what makes the "memory survives across sessions" demo meaningful rather than trivial.
+- **Amazon Bedrock** — The agent calls Titan Text Embeddings V2 (`amazon.titan-embed-text-v2:0`) via the `bedrock-runtime` Boto3 client to convert both stored memories and incoming queries into 1024-dimensional vectors before they're written to or queried from CockroachDB.
 
 ## License
 
-[MIT or Apache 2.0 — TBD, must be visible in repo "About" section per hackathon rules]
+MIT
