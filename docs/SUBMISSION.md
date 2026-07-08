@@ -105,22 +105,19 @@ the memory's *behavior over time* is itself auditable and queryable. This is mem
 
 ## Links
 - **Repository:** https://github.com/tcconnally/perseus-vault-hackathon
-- **Demo video:** `<UPLOAD demo_video.mp4 TO YOUTUBE/VIMEO AND PASTE URL — see note below>`
+- **Demo video:** https://youtu.be/HSrB0Y2b_Ag
 - **License:** MIT
 
 ---
 
-## ✅ Demo video status — RE-RECORDED, needs hosting only
-`demo_video.mp4` has been **re-recorded to match the current build** (~119s, with a
+## ✅ Demo video status — RE-RECORDED and PUBLISHED
+`demo_video.mp4` was **re-recorded to match the current build** (~119s, with a
 narration voiceover that walks: agents forget → CockroachDB-backed memory + Bedrock
 embeddings → CockroachDB MCP Server inspection → survives a Lambda cold start →
-composite recall ranking → time-based decay). The committed `voiceover.mp3` is the new
-matching narration. It is fully consistent with the relational schema, ranked recall,
-decay, and MCP integration described above.
-
-**Only remaining step:** upload `demo_video.mp4` to YouTube or Vimeo (unlisted is
-fine) and paste the URL into the Devpost **Demo video** field above. Devpost does not
-host the raw file — it needs a video URL.
+composite recall ranking → time-based decay) and is published at
+**https://youtu.be/HSrB0Y2b_Ag**. The committed `voiceover.mp3` is the matching
+narration. It is fully consistent with the relational schema, ranked recall, decay,
+and MCP integration described above.
 
 **To regenerate** (self-contained; needs `ffmpeg` + `Pillow` + `OPENAI_API_KEY` for the
 TTS narration):
