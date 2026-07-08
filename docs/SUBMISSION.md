@@ -105,33 +105,26 @@ the memory's *behavior over time* is itself auditable and queryable. This is mem
 
 ## Links
 - **Repository:** https://github.com/tcconnally/perseus-vault-hackathon
-- **Demo video:** `<ADD UNLISTED YOUTUBE/VIMEO URL AFTER RE-RECORD — see note below>`
+- **Demo video:** `<UPLOAD demo_video.mp4 TO YOUTUBE/VIMEO AND PASTE URL — see note below>`
 - **License:** MIT
 
 ---
 
-## ⚠️ Demo video status — RE-RECORD NEEDED before submitting
-The committed `demo_video.mp4` was produced against the **previous** build and is now
-**out of date**. It shows:
-- the old flat `vault_entries` table (now the relational `agents` / `memories` /
-  `memory_events` schema), and
-- the `ccloud` CLI `CLUSTER_STATE_CREATED` health-check step (removed from the write
-  path).
+## ✅ Demo video status — RE-RECORDED, needs hosting only
+`demo_video.mp4` has been **re-recorded to match the current build** (~119s, with a
+narration voiceover that walks: agents forget → CockroachDB-backed memory + Bedrock
+embeddings → CockroachDB MCP Server inspection → survives a Lambda cold start →
+composite recall ranking → time-based decay). The committed `voiceover.mp3` is the new
+matching narration. It is fully consistent with the relational schema, ranked recall,
+decay, and MCP integration described above.
 
-It also **predates the headline features** that anchor the primary judging criterion:
-composite recall ranking, salience reinforcement, time-based decay, and the
-CockroachDB MCP Server integration.
+**Only remaining step:** upload `demo_video.mp4` to YouTube or Vimeo (unlisted is
+fine) and paste the URL into the Devpost **Demo video** field above. Devpost does not
+host the raw file — it needs a video URL.
 
-The narrative arc (agents forget → CockroachDB-backed memory → Bedrock embeddings →
-survives a Lambda cold start) is still accurate, so a re-record — not a rewrite — is
-what's required.
-
-**To re-record:** the scene script in `generate_video.py` has already been updated to
-match the current build (relational schema, ranked recall, decay, MCP). Regenerate on
-a machine with `ffmpeg` + `Pillow`:
+**To regenerate** (self-contained; needs `ffmpeg` + `Pillow` + `OPENAI_API_KEY` for the
+TTS narration):
 ```bash
-pip install pillow
-python generate_video.py            # writes demo_video.mp4 in the repo root
+pip install pillow openai
+python generate_video.py   # rewrites demo_video.mp4 + voiceover.mp3 in the repo root
 ```
-Then upload the new video (unlisted is fine) and paste its URL into the Devpost
-**Demo video** field above.

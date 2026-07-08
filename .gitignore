@@ -2,3 +2,5 @@ uploads/
 .env
 venv/
 __pycache__/
+.video_frames/
+.video_audio/
