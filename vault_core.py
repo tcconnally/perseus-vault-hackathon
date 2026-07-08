@@ -159,7 +159,7 @@ class PerseusVaultCore:
                     """
                     SELECT id, content, metadata, salience, access_count,
                            created_at, last_accessed_at,
-                           embedding <-> %s AS distance
+                           embedding <=> %s AS distance
                     FROM memories
                     WHERE agent_id = %s AND decayed_at IS NULL
                     ORDER BY distance
