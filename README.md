@@ -12,10 +12,11 @@ Built for the **CockroachDB × AWS "Build with Agentic Memory" Hackathon (2026).
 **[vault-demo.perseus.observer](https://vault-demo.perseus.observer)** — teach an agent
 facts and recall them *by meaning* in your browser, backed by **real CockroachDB**.
 
-- Genuine CockroachDB (single-node, same engine as CockroachDB Cloud) with the entry's
-  real schema: structured facts **and** a native `VECTOR` column in one distributed
-  table, with the vector index enabled.
-- Recall runs as `ORDER BY embedding <-> query_vector` — actual in-database vector search,
+- Genuine CockroachDB (single-node, same engine as CockroachDB Cloud) demonstrating the
+  core idea on a focused single-table slice of the design: structured facts **and** a
+  native `VECTOR` column in one distributed table, with the vector index enabled. (The
+  full app uses the richer event-sourced schema + salience re-ranking described below.)
+- Recall runs as in-database vector search (`ORDER BY embedding <-> query_vector`) —
   not a simulation.
 - **Honest scope:** embeddings come from a small **local** model baked into the demo image
   (so it's keyless, free, and abuse-safe for public use); the production entry embeds on
