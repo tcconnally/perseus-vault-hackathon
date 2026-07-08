@@ -1,0 +1,30 @@
+# Perseus Vault x CockroachDB — live demo stack.
+#   docker compose up -d --build
+# Serves the web app on host :8824 (container 8080). CockroachDB runs single-node with
+# an in-memory store, so the public demo self-cleans on restart and needs no volume.
+services:
+  cockroach:
+    image: cockroachdb/cockroach:latest
+    command: start-single-node --insecure --store=type=mem,size=1GiB --http-addr=:8090
+    restart: unless-stopped
+    networks: [crnet]
+    healthcheck:
+      test: ["CMD", "cockroach", "sql", "--insecure", "-e", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  crdb-demo:
+    build: .
+    environment:
+      CRDB_DSN: "postgresql://root@cockroach:26257/defaultdb?sslmode=disable"
+    ports:
+      - "8824:8080"
+    depends_on:
+      cockroach:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [crnet]
+
+networks:
+  crnet: {}
