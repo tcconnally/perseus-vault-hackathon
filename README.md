@@ -7,6 +7,22 @@
 
 Built for the **CockroachDB × AWS "Build with Agentic Memory" Hackathon (2026).**
 
+## ▶️ Live demo
+
+**[vault-demo.perseus.observer](https://vault-demo.perseus.observer)** — teach an agent
+facts and recall them *by meaning* in your browser, backed by **real CockroachDB**.
+
+- Genuine CockroachDB (single-node, same engine as CockroachDB Cloud) with the entry's
+  real schema: structured facts **and** a native `VECTOR` column in one distributed
+  table, with the vector index enabled.
+- Recall runs as `ORDER BY embedding <-> query_vector` — actual in-database vector search,
+  not a simulation.
+- **Honest scope:** embeddings come from a small **local** model baked into the demo image
+  (so it's keyless, free, and abuse-safe for public use); the production entry embeds on
+  **Amazon Bedrock Titan v2**. Vectors are unit-normalized so `<->` ranks by cosine.
+- Per-visitor sandbox, rate-limited, idle-reaped. Source + stack: [`webdemo/`](webdemo/)
+  (`docker compose up -d --build`).
+
 ---
 
 ## 🧠 Agentic Memory Design (the core of this project)
