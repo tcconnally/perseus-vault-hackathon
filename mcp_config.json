@@ -1,0 +1,23 @@
+{
+  "_comment": "CockroachDB MCP Server wiring for the Perseus Vault memory cluster. Drop this into your MCP client (Claude Desktop / Cursor / Claude Code) config, or use it as the reference for the required CockroachDB MCP Server integration. Values are read from environment variables so no credentials are committed. The MCP server (github.com/amineelkouhen/mcp-cockroachdb) exposes natural-language query, vector search over the C-SPANN index, and cluster monitoring against the SAME cluster the agent writes to.",
+  "mcpServers": {
+    "cockroachdb": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/amineelkouhen/mcp-cockroachdb.git",
+        "cockroachdb-mcp-server"
+      ],
+      "env": {
+        "CRDB_HOST": "${CRDB_HOST}",
+        "CRDB_PORT": "${CRDB_PORT}",
+        "CRDB_DATABASE": "${CRDB_DATABASE}",
+        "CRDB_USERNAME": "${CRDB_USERNAME}",
+        "CRDB_PWD": "${CRDB_PWD}",
+        "CRDB_SSL_MODE": "${CRDB_SSL_MODE}",
+        "CRDB_SSL_CA_PATH": "${CRDB_SSL_CA_PATH}"
+      }
+    }
+  }
+}

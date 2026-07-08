@@ -14,9 +14,11 @@ OUTPUT_COLOR = (200, 200, 200)      # light gray
 TITLE_COLOR = (100, 180, 255)       # blue
 HIGHLIGHT_COLOR = (255, 200, 50)    # gold
 FPS = 24
-OUTPUT_DIR = "/tmp/video_frames"
-VIDEO_PATH = "/opt/data/webui/minions/.minions-data/workspace/demo_video.mp4"
-VOICEOVER_PATH = "/opt/data/webui/minions/.minions-data/workspace/voiceover.mp3"
+# Paths default to this repo but can be overridden via env vars.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.getenv("VIDEO_FRAMES_DIR", os.path.join(_HERE, ".video_frames"))
+VIDEO_PATH = os.getenv("VIDEO_PATH", os.path.join(_HERE, "demo_video.mp4"))
+VOICEOVER_PATH = os.getenv("VOICEOVER_PATH", os.path.join(_HERE, "voiceover.mp3"))
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -107,34 +109,32 @@ scenes = [
         ("$ python bedrock_agent.py", PROMPT_COLOR),
         ("", OUTPUT_COLOR),
         ("--- STEP 1: ADDING MEMORY (BEDROCK) ---", TITLE_COLOR),
-        ("[health check] Running ccloud cluster info...", OUTPUT_COLOR),
-        ("[health check] Cluster state: CLUSTER_STATE_CREATED", OUTPUT_COLOR),
-    ]),
-    (5, [
-        ("[health check] Cluster state: CLUSTER_STATE_CREATED", OUTPUT_COLOR),
-        ("[bedrock] Generating 1024-dim embedding...", OUTPUT_COLOR),
         ("[bedrock] Model: amazon.titan-embed-text-v2:0", OUTPUT_COLOR),
-        ("[db] INSERT INTO vault_entries (content, embedding)", PROMPT_COLOR),
-        ("[db] 1 row committed. Memory stored.", OUTPUT_COLOR),
+        ("[bedrock] Generating 1024-dim embedding...", OUTPUT_COLOR),
     ]),
     (5, [
-        ("--- CockroachDB Cloud SQL Console ---", TITLE_COLOR),
-        ("", OUTPUT_COLOR),
-        ("crdb> SELECT id, content, embedding", PROMPT_COLOR),
-        ("      FROM vault_entries", PROMPT_COLOR),
-        ("      ORDER BY id DESC LIMIT 1;", PROMPT_COLOR),
+        ("[bedrock] Generating 1024-dim embedding...", OUTPUT_COLOR),
+        ("[db] INSERT INTO memories (content, metadata,", PROMPT_COLOR),
+        ("[db]   embedding, salience) ... RETURNING id", PROMPT_COLOR),
+        ("[db] + memory_events (event_type='store')", PROMPT_COLOR),
+        ("[db] committed transactionally. Memory stored.", OUTPUT_COLOR),
     ]),
     (5, [
-        ("      ORDER BY id DESC LIMIT 1;", PROMPT_COLOR),
+        ("--- CockroachDB MCP Server (natural language) ---", TITLE_COLOR),
         ("", OUTPUT_COLOR),
-        (" id   | content                        | embedding", HIGHLIGHT_COLOR),
-        ("------+--------------------------------+-----------", HIGHLIGHT_COLOR),
-        (" a1b2 | deployment target is AWS       | [0.023,    ", OUTPUT_COLOR),
-        ("      | Lambda, us-east-1              | -0.141, ...]", OUTPUT_COLOR),
-        ("", OUTPUT_COLOR),
-        ("(1 row) -- real memory in a real database", OUTPUT_COLOR),
+        (">>> \"show the newest memory and its salience\"", PROMPT_COLOR),
+        ("[mcp] cockroachdb-mcp-server -> SQL", OUTPUT_COLOR),
+        ("[mcp] SELECT id, content, salience FROM memories", OUTPUT_COLOR),
     ]),
-    # Part 3: The Payoff (90-120s)  
+    (5, [
+        (" id   | content                     | salience", HIGHLIGHT_COLOR),
+        ("------+-----------------------------+---------", HIGHLIGHT_COLOR),
+        (" a1b2 | Phoenix deploys to AWS       | 1.00", OUTPUT_COLOR),
+        ("      | Lambda, us-east-1           |", OUTPUT_COLOR),
+        ("", OUTPUT_COLOR),
+        ("(1 row) -- distributed, transactional memory", OUTPUT_COLOR),
+    ]),
+    # Part 3: The Payoff (90-120s)
     (5, [
         ("--- New Lambda Invocation ---", TITLE_COLOR),
         ("[CloudWatch] START RequestId: xyz-123", OUTPUT_COLOR),
@@ -145,17 +145,25 @@ scenes = [
     (5, [
         (">>> What region am I deploying to?", PROMPT_COLOR),
         ("[recall] Embedding query via Bedrock Titan...", OUTPUT_COLOR),
-        ("[recall] SELECT ... ORDER BY embedding <-> query", PROMPT_COLOR),
-        ("[recall] LIMIT 3", PROMPT_COLOR),
-        ("[recall] 1 relevant memory found. Distance: 0.12", OUTPUT_COLOR),
+        ("[recall] vector search -> candidate pool (C-SPANN)", PROMPT_COLOR),
+        ("[recall] re-rank: 0.60*sim + 0.25*recency", PROMPT_COLOR),
+        ("[recall]          + 0.15*frequency, x salience", PROMPT_COLOR),
     ]),
     (5, [
-        ("[recall] 1 relevant memory found. Distance: 0.12", OUTPUT_COLOR),
+        ("[recall] top match score=0.94  reinforced +0.15", OUTPUT_COLOR),
         ("", OUTPUT_COLOR),
         (">>> You're deploying to AWS Lambda,", HIGHLIGHT_COLOR),
         (">>> in us-east-1.", HIGHLIGHT_COLOR),
         ("", OUTPUT_COLOR),
         ("--- Memory survived across sessions.", OUTPUT_COLOR),
+    ]),
+    # Decay: forgetting is a feature
+    (5, [
+        ("$ python decay.py", PROMPT_COLOR),
+        ("[decay] aging salience by exp(-rate * days_idle)", OUTPUT_COLOR),
+        ("[decay] stale memories archived (decayed_at set)", OUTPUT_COLOR),
+        ("[decay] aged=42  archived=7", HIGHLIGHT_COLOR),
+        ("--- Signal kept alive by use; noise fades.", OUTPUT_COLOR),
     ]),
     # Closing (120-128s)
     (8, [

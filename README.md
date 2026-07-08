@@ -1,166 +1,220 @@
-# Perseus-Vault: An Agentic Memory Core
+# Perseus Vault — Agentic Memory on CockroachDB
 
-> Perseus-Vault is an AI agent whose intelligence is only as good as its memory — so we gave it a
-> production-grade one. Instead of bolting on a fragile, in-memory vector store, Perseus uses CockroachDB's
-> distributed SQL and vector indexing as a single, consistent source of truth for everything the agent
-> knows: facts, embeddings, and conversation state, all transactionally safe and built to survive
-> real-world scale. Deployed as an AWS Lambda-backed agent, Perseus-Vault proves a simple thesis: an
-> agent doesn't just need to think and act — it needs to *remember*, reliably.
+> An AI agent is only as good as what it can remember. Perseus Vault gives agents a
+> **production-grade memory** — store, recall, reinforce, and decay — backed by
+> CockroachDB's distributed SQL + vector index as a single transactional source of
+> truth, embedded on Amazon Bedrock, and served from AWS Lambda.
 
-Built for the CockroachDB × AWS Hackathon (2026).
+Built for the **CockroachDB × AWS "Build with Agentic Memory" Hackathon (2026).**
 
-## Table of Contents
-- [Core Concepts](#core-concepts)
-- [How It Works](#how-it-works)
-- [Setup & Installation](#setup--installation)
-- [Usage](#usage)
-- [CockroachDB & AWS Tools Used](#cockroachdb--aws-tools-used)
-- [License](#license)
+---
 
-## Core Concepts
+## 🧠 Agentic Memory Design (the core of this project)
 
-*Why does reliable memory matter for AI agents?*
+Human memory isn't a dump of everything ever seen — it *ranks*, *reinforces*, and
+*forgets*. Perseus Vault gives an agent the same three behaviors, and every one of
+them is implemented against CockroachDB, not in a fragile in-process cache.
 
-Most AI agents have a critical flaw: they're forgetful. Their "memory" is often just the context window of the current conversation, which vanishes the moment the session ends. For an agent to be more than a chatbot, to be a trustworthy partner in multi-step, long-running tasks, it needs a memory that persists.
+### 1. Recall ranking — relevance is more than cosine distance
+A naive vector store returns the nearest embeddings and stops there. Perseus Vault
+treats nearest-neighbor as a **candidate pool**, then re-ranks with a composite
+salience score that mirrors how memory actually surfaces:
 
-Some agents attempt this by bolting on a standalone vector database. This is a step in the right direction, but it introduces a new problem: data inconsistency. The agent's structured knowledge and its semantic/vector memory now live in two different systems, which can drift out of sync and are not updated transactionally.
+```
+score = salience × ( 0.60·similarity  +  0.25·recency  +  0.15·frequency )
+```
 
-Perseus-Vault solves this by using CockroachDB as a single, unified system of record. Both the agent's state and its vector embeddings live in the same distributed, transactional database. This design provides:
-- **Persistence:** Memory survives across sessions, reboots, and deployments.
-- **Consistency:** Writes are atomic. The agent's understanding of the world is never left in a half-updated state.
-- **Scalability:** CockroachDB's distributed architecture means the agent's memory can grow without hitting a single-node bottleneck.
+- **similarity** — `1 − cosine_distance` from CockroachDB's distributed vector index.
+- **recency** — exponential decay with a configurable half-life (default 7 days).
+- **frequency** — diminishing-returns boost from how often the memory has been recalled.
+- **salience** — a per-memory weight that grows on use and shrinks with neglect.
 
-## How It Works
+So a slightly-less-similar fact that the agent relies on every day can rightly
+out-rank a closer-but-stale one. (`vault_core.py → recall_memories`)
 
-The Perseus-Vault agent is a Python application designed to run as a serverless function on AWS Lambda. Every interaction is a stateless execution, forcing the agent to rely entirely on its externalized memory in CockroachDB.
+### 2. Cross-session persistence — memory outlives the process
+Every memory is keyed to an **agent identity** (`agents` table) and lives in
+CockroachDB. The agent runs on **AWS Lambda**, where each invocation is a fresh,
+stateless execution environment. Because nothing is held in process, "the agent
+remembers across sessions" is a real, demonstrable property — a memory written in
+one Lambda invocation is recalled, ranked, and reinforced in the next, even after a
+cold start. (`agents` + `memories` tables, `lambda_handler.py`)
+
+### 3. Decay — forgetting is a feature
+Unbounded memory becomes noise. A scheduled decay pass ages each memory's salience
+by `exp(−rate × days_idle)`; anything that falls below a threshold is **archived**
+(`decayed_at` set) and dropped from the active recall set — without deleting the
+audit trail. Recall, meanwhile, **reinforces** the winners (salience + access-count
+bump). Signal is kept alive by use; noise fades on its own.
+(`vault_core.py → run_decay` / `_reinforce`, runnable via `decay.py`)
+
+> Every store, recall, decay, and reinforce is written to an append-only
+> `memory_events` table with a timestamp and score — so the memory's *behavior over
+> time* is itself queryable and auditable.
+
+**Maps to the judging criteria:**
+
+| Judging criterion | Where it lives |
+| --- | --- |
+| **Agentic Memory Design** (primary) | Composite recall ranking, salience reinforcement, time-based decay, agent-scoped cross-session persistence, event-sourced memory log |
+| **Technical Implementation** | Distributed CockroachDB vector search (C-SPANN cosine index), relational schema with FKs + JSONB + inverted index, CockroachDB MCP Server integration, Bedrock embeddings, Lambda-native deploy |
+| **Real-World Impact** | Consistency-safe memory (no drift between structured state and vectors), horizontal scale, multi-region survivability, natural-language DB introspection for operators via MCP |
+
+---
+
+## 🏗️ Architecture
 
 ```mermaid
 flowchart TD
-    User["User / Client"] -->|"prompt or query"| Agent
+    User["User / Client"] -->|"HTTP: /remember /recall /decay"| Lambda
 
     subgraph AWS["AWS"]
-        Agent["Agent Logic (bedrock_agent.py)\nrunning on AWS Lambda"]
+        Lambda["Perseus Vault Agent\n(lambda_handler.py + bedrock_agent.py)\nAWS Lambda"]
+        Bedrock["Amazon Bedrock\nTitan Text Embeddings V2"]
     end
 
-    Agent -->|"add_memory() / recall_memories()"| CRDB
-    Agent -->|"generate embedding"| Embed["Embedding Model API\n(Amazon Bedrock)"]
-    Embed -->|"vector"| Agent
+    Lambda -->|"embed text"| Bedrock
+    Bedrock -->|"1024-d vector"| Lambda
+    Lambda -->|"store / hybrid recall / decay\n(psycopg2, transactional)"| CRDB
 
-    Agent -.->|"pre-flight health check\n(ccloud cluster info)"| CLI["ccloud CLI\n(Agent-Ready)"]
-    CLI -.->|"cluster state"| CCloud["CockroachDB Cloud\nControl Plane"]
-
-    subgraph CockroachDB["CockroachDB Cloud"]
-        CRDB[("Perseus Vault\nvault_entries table\nVECTOR column + cosine index")]
-        CCloud
+    subgraph CRDB_CLOUD["CockroachDB Cloud (distributed)"]
+        CRDB[("agents · memories · memory_events\nVECTOR + C-SPANN cosine index\nJSONB + inverted index")]
     end
 
-    Agent -->|"response"| User
+    Operator["Operator / Agent\n(Claude Desktop, Cursor, Claude Code)"]
+    Operator -->|"natural-language SQL,\nvector search, monitoring"| MCP["CockroachDB MCP Server\n(uvx: amineelkouhen/mcp-cockroachdb)"]
+    MCP --> CRDB
 
     style CRDB fill:#e8f4ff,stroke:#3778c2
-    style Agent fill:#fff3e0,stroke:#e08e2f
+    style Lambda fill:#fff3e0,stroke:#e08e2f
+    style MCP fill:#eafbea,stroke:#2f9e44
 ```
 
-The flow is as follows:
-1.  A user's prompt invokes the AWS Lambda function.
-2.  The agent logic in `bedrock_agent.py` receives the request.
-3.  To recall information, the agent sends the query to Amazon Bedrock to generate an embedding. It then queries the `vault_entries` table in CockroachDB, using `ORDER BY embedding <-> query_vector` to find the most semantically similar memories.
-4.  To add information, the agent first uses the `ccloud` CLI to run a health check against the cluster. If healthy, it generates an embedding for the new information via Bedrock and `INSERT`s the content and vector into the `vault_entries` table in a single atomic transaction.
-5.  The agent formulates a response based on the recalled memories and returns it to the user.
+The **agent path** (Lambda → Bedrock → CockroachDB) and the **operator path**
+(MCP client → CockroachDB MCP Server → same cluster) both hit one consistent store.
 
-### Tech Stack
-- **Agent logic**: Python (`agent.py` for OpenAI, `bedrock_agent.py` for AWS Bedrock)
-- **Memory layer**: Perseus Vault (custom) + CockroachDB (Distributed Vector Indexing, ccloud CLI)
-- **Compute**: AWS Lambda
-- **[Additional AWS services — TBD]**
+---
 
-## Setup & Installation
+## 🗄️ Data model (relational, event-sourced)
+
+Not a flat key-value table — a normalized schema with foreign keys, timestamped
+events, and JSONB for flexible content. See `db_schema.py`.
+
+- **`agents`** — `id`, `name` (unique), `created_at`. The persistence anchor.
+- **`memories`** — `id`, `agent_id → agents (FK, cascade)`, `content`,
+  `metadata JSONB` (inverted-indexed), `embedding VECTOR(dim)` (C-SPANN cosine
+  index), `salience`, `access_count`, `created_at`, `last_accessed_at`, `decayed_at`.
+- **`memory_events`** — append-only `store | recall | decay | reinforce` log with
+  `memory_id`/`agent_id` FKs, `score`, and `occurred_at`.
+
+Multi-region survivability (`REGIONAL BY ROW`, `SURVIVE REGION FAILURE`) is available
+and documented in `db_schema.py → MULTI_REGION_SQL`.
+
+---
+
+## 🔌 CockroachDB MCP Server integration
+
+The required [CockroachDB MCP Server](https://github.com/amineelkouhen/mcp-cockroachdb)
+is wired to the **same cluster** the agent uses, giving operators and other agents a
+natural-language interface for querying memories, running vector similarity searches,
+and monitoring cluster health.
+
+1. Install the [`uv`](https://docs.astral.sh/uv/) toolchain (provides `uvx`).
+2. Fill in the `CRDB_*` vars in `.env` (see `.env.example`).
+3. Verify the integration is launch-ready:
+   ```bash
+   python verify_mcp.py
+   ```
+4. Load `mcp_config.json` into your MCP client (Claude Desktop / Cursor / Claude Code).
+   The client launches the server via:
+   ```bash
+   uvx --from git+https://github.com/amineelkouhen/mcp-cockroachdb.git cockroachdb-mcp-server
+   ```
+
+Now you can ask, in natural language, *"show the 5 most-recalled memories for agent
+perseus-vault-demo-bedrock"* or *"run a cosine vector search against the memories
+table"* — the MCP server translates it to SQL against the live cluster.
+
+---
+
+## 🚀 Setup
 
 ### Prerequisites
 - Python 3.11+
-- A CockroachDB Cloud account and cluster ([sign up](https://cockroachlabs.cloud))
-- An AWS account with Lambda access
-- `ccloud` CLI installed and authenticated
+- A [CockroachDB Cloud](https://cockroachlabs.cloud) cluster
+- An AWS account with Amazon Bedrock (Titan Embeddings) + Lambda access
+- [`uv`](https://docs.astral.sh/uv/) (for the CockroachDB MCP Server)
 
-### 1. Clone the repository
+### 1. Install
 ```bash
-git clone <repo-url>
-cd perseus-vault
-```
-
-### 2. Create a virtual environment
-```bash
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-```
-
-### 3. Install dependencies
-```bash
+git clone https://github.com/tcconnally/perseus-vault-hackathon
+cd perseus-vault-hackathon
+python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 4. Configure environment variables
-Create a `.env` file in the project root:
+### 2. Configure
+```bash
+cp .env.example .env      # then fill in real values — .env is gitignored
 ```
-# For OpenAI version (agent.py)
-# DATABASE_URL="postgresql://<user>:<password>@<host>:26257/<database>?sslmode=verify-full&sslrootcert=<path-to-ca.crt>"
-# OPENAI_API_KEY="sk-..."
-# EMBEDDING_DIMENSION=1536
 
-# For AWS Bedrock version (bedrock_agent.py)
-DATABASE_URL="postgresql://<user>:<password>@<host>:26257/<database>?sslmode=verify-full&sslrootcert=<path-to-ca.crt>"
-AWS_REGION="us-east-1"
-EMBEDDING_DIMENSION=1024
-
-# Required for both
-CCLOUD_CLUSTER_NAME="<your-cluster-name>"
-```
-You will also need to have your AWS credentials configured in your environment (e.g., via `~/.aws/credentials` or environment variables `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`).
-
-### 5. Initialize the database schema
+### 3. Create the schema
 ```bash
 python db_schema.py
 ```
 
-## Usage
+### 4. Run the demo
+```bash
+python bedrock_agent.py   # store + hybrid recall via Amazon Bedrock
+python decay.py           # run a decay/maintenance pass
+python verify_mcp.py      # confirm the CockroachDB MCP Server is launch-ready
+```
 
-### Running Locally
+---
+
+## 🌐 Usage (REST API)
+
+Run locally (`python handler.py`) or deploy to Lambda. Endpoints:
 
 ```bash
-# Ensure your .env file is configured, then run the Bedrock variant:
-python bedrock_agent.py
+# Store a memory with flexible JSONB metadata
+curl -X POST $URL/remember -H 'Content-Type: application/json' \
+  -d '{"content":"Project Phoenix deploys to AWS Lambda in us-east-1.",
+       "metadata":{"project":"phoenix","type":"infra"}}'
+
+# Recall — returns memories ranked by the composite salience score
+curl -X POST $URL/recall -H 'Content-Type: application/json' \
+  -d '{"query":"Where does Phoenix deploy?","top_k":3}'
+
+# Run a decay pass (schedule via Amazon EventBridge)
+curl -X POST $URL/decay
+
+# Health + vault stats (active vs archived memory counts)
+curl $URL/health
 ```
 
-**Example output:**
-```
---- STEP 1: ADDING MEMORY (BEDROCK) ---
-Running health check on cluster 'my-cluster'...
-Health check PASSED. Cluster is in CREATED state.
-Generating embedding for: 'The primary contact for the Cerberus project is Dr. Aris Thorne.'
-Successfully added new memory to the Perseus Vault.
-
---- STEP 2: RECALLING MEMORY (BEDROCK) ---
-Recalling memories related to: 'Who is the main contact for project Cerberus?'
-
-Top recalled memories:
-  - [Content]: The primary contact for the Cerberus project is Dr. Aris Thorne. (Distance: 0.1234)
+### Deploy to AWS Lambda
+```bash
+docker build -t perseus-vault .
+# Push to Amazon ECR, create a Lambda from the container image, add a Function URL.
+# Optional: EventBridge schedule -> Lambda to run decay.py periodically.
 ```
 
-### Deploying to AWS Lambda
+---
 
-1. Build the Docker image:
-   ```bash
-   docker build -t perseus-vault .
-   ```
-2. Push to Amazon ECR and create a Lambda function using the container image.
-3. Invoke the function to see persistent memory across stateless invocations.
+## 📦 Repo layout
 
-## CockroachDB & AWS Tools Used
-
-- **CockroachDB Distributed Vector Indexing** — The agent's memory table (`vault_entries`) stores each memory's text content alongside a vector embedding in a native `VECTOR` column, indexed with a cosine-similarity vector index (`VECTOR INDEX ... vector_cosine_ops`). When the agent needs to recall information, it embeds the incoming query and runs an `ORDER BY embedding <-> query_vector LIMIT k` search directly against CockroachDB — no separate vector database, and no consistency gap between the agent's operational data and its semantic memory.
-- **ccloud CLI (Agent-Ready)** — Before committing a new memory to the database, the agent shells out to `ccloud cluster info` and checks that the cluster is reporting a healthy state before proceeding with the write. If the cluster isn't healthy, the agent logs a clear warning and skips the write rather than failing silently.
-- **AWS Lambda** — Hosts the agent's core logic (`bedrock_agent.py`) as a serverless function. Every invocation is a fresh execution environment, which is precisely what makes the "memory survives across sessions" demo meaningful rather than trivial.
-- **Amazon Bedrock** — The agent calls Titan Text Embeddings V2 (`amazon.titan-embed-text-v2:0`) via the `bedrock-runtime` Boto3 client to convert both stored memories and incoming queries into 1024-dimensional vectors before they're written to or queried from CockroachDB.
+| File | Role |
+| --- | --- |
+| `vault_core.py` | Provider-agnostic memory engine: hybrid recall ranking, reinforcement, decay |
+| `bedrock_agent.py` | Amazon Bedrock embedding provider (primary AWS path) |
+| `agent.py` | OpenAI embedding provider (fallback) |
+| `db_schema.py` | Distributed CockroachDB relational schema |
+| `decay.py` | Standalone decay/maintenance runner (schedulable) |
+| `mcp_config.json` / `verify_mcp.py` | CockroachDB MCP Server wiring + preflight |
+| `handler.py` / `lambda_handler.py` | Flask (local) and AWS Lambda entrypoints |
+| `Dockerfile` / `Dockerfile.lambda` | Lambda container image |
+| `docs/SUBMISSION.md` | Devpost submission copy |
 
 ## License
-
-MIT
+MIT — see [LICENSE](LICENSE).
